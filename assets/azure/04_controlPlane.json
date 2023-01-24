@@ -1,0 +1,232 @@
+{
+    "$schema" : "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion" : "1.0.0.0",
+    "parameters" : {
+      "baseName" : {
+        "type" : "string",
+        "minLength" : 1,
+        "metadata" : {
+          "description" : "Base name to be used in resource names (usually the cluster's Infra ID)"
+        }
+      },
+      "controlPlaneIgnition" : {
+        "type" : "string",
+        "metadata" : {
+          "description" : "Ignition content for the controlPlane nodes"
+        }
+      },
+      "numberOfControlPlaneNodes" : {
+        "type" : "int",
+        "defaultValue" : 3,
+        "minValue" : 2,
+        "maxValue" : 5,
+        "metadata" : {
+          "description" : "Number of OpenShift controlPlane Nodes to deploy"
+        }
+      },
+      "sshKeyData" : {
+        "type" : "securestring",
+        "metadata" : {
+          "description" : "SSH RSA public key file as a string"
+        }
+      },
+      "diagnosticStorageAccount" : {
+        "type" : "string",
+        "minLength" : 1,
+        "metadata" : {
+          "description" : "Storage account for diagnostic informations"
+        }
+      },
+      "privateDNSZoneName" : {
+        "type" : "string",
+        "metadata" : {
+          "description" : "Name of the private DNS zone the controlPlane nodes are going to be attached to"
+        }
+      },
+      "controlPlaneVMSize" : {
+        "type" : "string",
+        "defaultValue" : "Standard_D4ds_v4",
+        "metadata" : {
+          "description" : "The size of the controlPlane Virtual Machines"
+        }
+      },
+      "diskSizeGB" : {
+        "type" : "int",
+        "defaultValue" : 512,
+        "metadata" : {
+          "description" : "Size of the controlPlane VM OS disk, in GB"
+        }
+      },
+      "imageID": {
+        "type": "string",
+        "metadata": {
+          "description": "The ID of the image used to instantiate the VM"
+        }
+      }
+    },
+    "variables" : {
+      "location" : "[resourceGroup().location]",
+      "virtualNetworkName" : "[concat(resourceGroup().name, '-vnet')]",
+      "virtualNetworkID" : "[resourceId('Microsoft.Network/virtualNetworks', variables('virtualNetworkName'))]",
+      "controlPlaneSubnetName" : "[concat(resourceGroup().name, '-controlPlane-subnet')]",
+      "controlPlaneSubnetRef" : "[concat(variables('virtualNetworkID'), '/subnets/', variables('controlPlaneSubnetName'))]",
+      "internalLoadBalancerName" : "[concat(parameters('baseName'), '-internal-lb')]",
+      "publicLoadBalancerName" : "[concat(parameters('baseName'), '-public-lb')]",
+      "sshKeyPath" : "/home/core/.ssh/authorized_keys",
+      "identityName" : "[concat(resourceGroup().name, '-identity')]",
+      "copy" : [
+        {
+          "name" : "vmNames",
+          "count" :  "[parameters('numberOfControlPlaneNodes')]",
+          "input" : "[concat(parameters('baseName'), '-controlPlane-', copyIndex('vmNames'))]"
+        }
+      ]
+    },
+    "resources" : [
+      {
+        "apiVersion" : "2018-06-01",
+        "type" : "Microsoft.Network/networkInterfaces",
+        "copy" : {
+          "name" : "nicCopy",
+          "count" : "[length(variables('vmNames'))]"
+        },
+        "name" : "[concat(variables('vmNames')[copyIndex()], '-nic')]",
+        "location" : "[variables('location')]",
+        "properties" : {
+          "ipConfigurations" : [
+            {
+              "name" : "pipConfig",
+              "properties" : {
+                "privateIPAllocationMethod" : "Dynamic",
+                "subnet" : {
+                  "id" : "[variables('controlPlaneSubnetRef')]"
+                },
+                "loadBalancerBackendAddressPools" : [
+                  {
+                    "id" : "[concat('/subscriptions/', subscription().subscriptionId, '/resourceGroups/', resourceGroup().name, '/providers/Microsoft.Network/loadBalancers/', variables('publicLoadBalancerName'), '/backendAddressPools/public-lb-backend')]"
+                  },
+                  {
+                    "id" : "[concat('/subscriptions/', subscription().subscriptionId, '/resourceGroups/', resourceGroup().name, '/providers/Microsoft.Network/loadBalancers/', variables('internalLoadBalancerName'), '/backendAddressPools/internal-lb-backend')]"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "apiVersion": "2018-09-01",
+        "type": "Microsoft.Network/privateDnsZones/SRV",
+        "name": "[concat(parameters('privateDNSZoneName'), '/_etcd-server-ssl._tcp')]",
+        "location" : "[variables('location')]",
+        "properties": {
+          "ttl": 60,
+          "copy": [{
+            "name": "srvRecords",
+            "count": "[length(variables('vmNames'))]",
+            "input": {
+              "priority": 0,
+              "weight" : 10,
+              "port" : 2380,
+              "target" : "[concat('etcd-', copyIndex('srvRecords'), '.', parameters('privateDNSZoneName'))]"
+            }
+          }]
+        }
+      },
+      {
+        "apiVersion": "2018-09-01",
+        "type": "Microsoft.Network/privateDnsZones/A",
+        "copy" : {
+          "name" : "dnsCopy",
+          "count" : "[length(variables('vmNames'))]"
+        },
+        "name": "[concat(parameters('privateDNSZoneName'), '/etcd-', copyIndex())]",
+        "location" : "[variables('location')]",
+        "dependsOn" : [
+          "[concat('Microsoft.Network/networkInterfaces/', concat(variables('vmNames')[copyIndex()], '-nic'))]"
+        ],
+        "properties": {
+          "ttl": 60,
+          "aRecords": [
+            {
+              "ipv4Address": "[reference(concat(variables('vmNames')[copyIndex()], '-nic')).ipConfigurations[0].properties.privateIPAddress]"
+            }
+          ]
+        }
+      },
+      {
+        "apiVersion" : "2018-06-01",
+        "type" : "Microsoft.Compute/virtualMachines",
+        "copy" : {
+          "name" : "vmCopy",
+          "count" : "[length(variables('vmNames'))]"
+        },
+        "name" : "[variables('vmNames')[copyIndex()]]",
+        "location" : "[variables('location')]",
+        "identity" : {
+          "type" : "userAssigned",
+          "userAssignedIdentities" : {
+            "[resourceID('Microsoft.ManagedIdentity/userAssignedIdentities/', variables('identityName'))]" : {}
+          }
+        },
+        "dependsOn" : [
+          "[concat('Microsoft.Network/networkInterfaces/', concat(variables('vmNames')[copyIndex()], '-nic'))]",
+          "[concat('Microsoft.Network/privateDnsZones/', parameters('privateDNSZoneName'), '/A/etcd-', copyIndex())]",
+          "[concat('Microsoft.Network/privateDnsZones/', parameters('privateDNSZoneName'), '/SRV/_etcd-server-ssl._tcp')]"
+        ],
+        "properties" : {
+          "hardwareProfile" : {
+            "vmSize" : "[parameters('controlPlaneVMSize')]"
+          },
+          "osProfile" : {
+            "computerName" : "[variables('vmNames')[copyIndex()]]",
+            "adminUsername" : "core",
+            "customData" : "[parameters('controlPlaneIgnition')]",
+            "linuxConfiguration" : {
+              "disablePasswordAuthentication" : true,
+              "ssh" : {
+                "publicKeys" : [
+                  {
+                    "path" : "[variables('sshKeyPath')]",
+                    "keyData" : "[parameters('sshKeyData')]"
+                  }
+                ]
+              }
+            }
+          },
+          "storageProfile" : {
+            "imageReference": {
+              "id": "[parameters('imageID')]"
+            },
+            "osDisk" : {
+              "name": "[concat(variables('vmNames')[copyIndex()], '_OSDisk')]",
+              "osType" : "Linux",
+              "createOption" : "FromImage",
+              "caching": "ReadOnly",
+              "writeAcceleratorEnabled": false,
+              "managedDisk": {
+                "storageAccountType": "Premium_LRS"
+              },
+              "diskSizeGB" : "[parameters('diskSizeGB')]"
+            }
+          },
+          "networkProfile" : {
+            "networkInterfaces" : [
+              {
+                "id" : "[resourceId('Microsoft.Network/networkInterfaces', concat(variables('vmNames')[copyIndex()], '-nic'))]",
+                "properties": {
+                  "primary": false
+                }
+              }
+            ]
+          },
+      "diagnosticsProfile": {
+          "bootDiagnostics": {
+          "enabled": "true",
+          "storageUri": "[concat('https://', parameters('diagnosticStorageAccount'), '.blob.core.windows.net')]"
+          }
+      }
+        }
+      }
+    ]
+  }

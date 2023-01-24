@@ -1,0 +1,171 @@
+{
+  "$schema" : "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion" : "1.0.0.0",
+  "parameters" : {
+    "baseName" : {
+      "type" : "string",
+      "minLength" : 1,
+      "metadata" : {
+        "description" : "Base name to be used in resource names (usually the cluster's Infra ID)"
+      }
+    },
+    "bootstrapIgnition" : {
+      "type" : "string",
+      "minLength" : 1,
+      "metadata" : {
+        "description" : "Bootstrap ignition content for the bootstrap cluster"
+      }
+    },
+    "diagnosticStorageAccount" : {
+      "type" : "string",
+      "minLength" : 1,
+      "metadata" : {
+        "description" : "Storage account for diagnostic informations"
+      }
+    },
+    "sshKeyData" : {
+      "type" : "securestring",
+      "metadata" : {
+        "description" : "SSH RSA public key file as a string."
+      }
+    },
+    "bootstrapVMSize" : {
+      "type" : "string",
+      "defaultValue" : "Standard_D8ds_v4",
+      "metadata" : {
+        "description" : "The size of the Bootstrap Virtual Machine"
+      }
+    },
+    "imageID": {
+      "type": "string",
+      "metadata": {
+        "description": "The ID of the image used to instantiate the VM"
+      }
+    }
+  },
+  "variables" : {
+    "location" : "[resourceGroup().location]",
+    "virtualNetworkName" : "[concat(resourceGroup().name, '-vnet')]",
+    "virtualNetworkID" : "[resourceId('Microsoft.Network/virtualNetworks', variables('virtualNetworkName'))]",
+    "controlPlaneSubnetName" : "[concat(resourceGroup().name, '-controlPlane-subnet')]",
+    "controlPlaneSubnetRef" : "[concat(variables('virtualNetworkID'), '/subnets/', variables('controlPlaneSubnetName'))]",
+    "internalLoadBalancerName" : "[concat(parameters('baseName'), '-internal-lb')]",
+    "publicLoadBalancerName" : "[concat(parameters('baseName'), '-public-lb')]",
+    "sshKeyPath" : "/home/core/.ssh/authorized_keys",
+    "identityName" : "[concat(resourceGroup().name, '-identity')]",
+    "vmName" : "[concat(parameters('baseName'), '-bootstrap')]",
+    "nicName" : "[concat(variables('vmName'), '-nic')]",
+    "clusterNsgName" : "[concat(resourceGroup().name, '-nsg')]"
+  },
+  "resources" : [
+    {
+      "apiVersion" : "2018-06-01",
+      "type" : "Microsoft.Network/networkInterfaces",
+      "name" : "[variables('nicName')]",
+      "location" : "[variables('location')]",
+      "properties" : {
+        "ipConfigurations" : [
+          {
+            "name" : "pipConfig",
+            "properties" : {
+              "privateIPAllocationMethod" : "Dynamic",
+              "subnet" : {
+                "id" : "[variables('controlPlaneSubnetRef')]"
+              },
+              "loadBalancerBackendAddressPools" : [
+                {
+                  "id" : "[concat('/subscriptions/', subscription().subscriptionId, '/resourceGroups/', resourceGroup().name, '/providers/Microsoft.Network/loadBalancers/', variables('publicLoadBalancerName'), '/backendAddressPools/public-lb-backend')]"
+                },
+                {
+                  "id" : "[concat('/subscriptions/', subscription().subscriptionId, '/resourceGroups/', resourceGroup().name, '/providers/Microsoft.Network/loadBalancers/', variables('internalLoadBalancerName'), '/backendAddressPools/internal-lb-backend')]"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion" : "2018-06-01",
+      "type" : "Microsoft.Compute/virtualMachines",
+      "name" : "[variables('vmName')]",
+      "location" : "[variables('location')]",
+      "identity" : {
+        "type" : "userAssigned",
+        "userAssignedIdentities" : {
+          "[resourceID('Microsoft.ManagedIdentity/userAssignedIdentities/', variables('identityName'))]" : {}
+        }
+      },
+      "dependsOn" : [
+        "[concat('Microsoft.Network/networkInterfaces/', variables('nicName'))]"
+      ],
+      "properties" : {
+        "hardwareProfile" : {
+          "vmSize" : "[parameters('bootstrapVMSize')]"
+        },
+        "osProfile" : {
+          "computerName" : "[variables('vmName')]",
+          "adminUsername" : "core",
+          "customData" : "[parameters('bootstrapIgnition')]",
+          "linuxConfiguration" : {
+            "disablePasswordAuthentication" : true,
+            "ssh" : {
+              "publicKeys" : [
+                {
+                  "path" : "[variables('sshKeyPath')]",
+                  "keyData" : "[parameters('sshKeyData')]"
+                }
+              ]
+            }
+          }
+        },
+        "storageProfile" : {
+          "imageReference": {
+            "id": "[parameters('imageID')]"
+          },
+          "osDisk" : {
+            "name": "[concat(variables('vmName'),'_OSDisk')]",
+            "osType" : "Linux",
+            "createOption" : "FromImage",
+            "managedDisk": {
+              "storageAccountType": "Premium_LRS"
+            },
+            "diskSizeGB" : 100
+          }
+        },
+        "networkProfile" : {
+          "networkInterfaces" : [
+            {
+              "id" : "[resourceId('Microsoft.Network/networkInterfaces', variables('nicName'))]"
+            }
+          ]
+        },
+	"diagnosticsProfile": {
+	    "bootDiagnostics": {
+		"enabled": "true",
+		"storageUri": "[concat('https://', parameters('diagnosticStorageAccount'), '.blob.core.windows.net')]"
+	    }
+	}
+      }
+    },
+    {
+      "apiVersion" : "2018-06-01",
+      "type": "Microsoft.Network/networkSecurityGroups/securityRules",
+      "name" : "[concat(variables('clusterNsgName'), '/bootstrap_ssh_in')]",
+      "location" : "[variables('location')]",
+      "dependsOn" : [
+        "[resourceId('Microsoft.Compute/virtualMachines', variables('vmName'))]"
+      ],
+      "properties": {
+        "protocol" : "Tcp",
+        "sourcePortRange" : "*",
+        "destinationPortRange" : "22",
+        "sourceAddressPrefix" : "149.173.0.0/16",
+        "destinationAddressPrefix" : "*",
+        "access" : "Allow",
+        "priority" : 100,
+        "direction" : "Inbound"
+      }
+    }
+  ]
+}

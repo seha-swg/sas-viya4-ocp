@@ -1,0 +1,68 @@
+{
+   "checksum": "698b58d554543b4000396a9a26387e8f",
+   "roots": {
+      "bookmark_bar": {
+         "children": [ {
+            "date_added": "13262278458914961",
+            "guid": "15acce8f-0c92-459b-b7f9-da24b36ca4f1",
+            "id": "8",
+            "name": "Deploy on OpenShift",
+            "type": "url",
+            "url": "https://gelgitlab.race.sas.com/GEL/workshops/PSGEL300-sas-viya-4-deployment-on-red-hat-openshift-container-platform"
+         }, {
+            "date_added": "13262278644509968",
+            "guid": "f7508cf6-0f7d-49ef-87e1-2ad0e0e1a673",
+            "id": "9",
+            "name": "Deploy on K8s",
+            "type": "url",
+            "url": "https://gelgitlab.race.sas.com/GEL/workshops/PSGEL255-deploying-viya-4.0.1-on-kubernetes"
+         }, {
+            "date_added": "13262479404299462",
+            "guid": "5c32a3f8-f86e-4122-9b46-9ad62b09d726",
+            "id": "11",
+            "name": "SAS Studio",
+            "type": "url",
+            "url": "{{ VIYA_URL }}/SASStudio/"
+         }, {
+            "date_added": "13262479518395248",
+            "guid": "9b946373-3c2c-4e14-97e0-6bc47f589631",
+            "id": "12",
+            "name": "SAS Environment Manager",
+            "type": "url",
+            "url": "{{ VIYA_URL }}/SASEnvironmentManager/"
+            }, {
+               "date_added": "13297444803649302",
+               "guid": "d9ef2c5a-885b-4768-a5c8-018097442265",
+               "id": "6",
+               "name": "Red Hat OpenShift Container Platform Console",
+               "type": "url",
+               "url": "{{ OCP_CONSOLE_URL }}"
+            } ],
+            "date_added": "13227731402520987",
+            "date_modified": "13297444803649302",
+            "guid": "0bc5d13f-2cba-5d74-951f-3f233fe6c908",
+            "id": "1",
+            "name": "Bookmarks bar",
+            "type": "folder"
+         },
+         "other": {
+            "children": [  ],
+            "date_added": "13227731402523103",
+            "date_modified": "0",
+            "guid": "82b081ec-3dd3-529c-8475-ab6c344590dd",
+            "id": "7",
+            "name": "Other bookmarks",
+            "type": "folder"
+         },
+         "synced": {
+            "children": [  ],
+            "date_added": "13227731402523112",
+            "date_modified": "0",
+            "guid": "4cf2e351-0e85-532b-bb37-df045d8f8d0f",
+            "id": "8",
+            "name": "Mobile bookmarks",
+            "type": "folder"
+         }
+      },
+      "version": 1
+   }

@@ -1,0 +1,1 @@
+../../common/GEL.034.Create.Azure.VNET.sh

@@ -1,0 +1,142 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion" : "1.0.0.0",
+    "parameters" : {
+      "baseName" : {
+        "type" : "string",
+        "minLength" : 1,
+        "metadata" : {
+          "description" : "Base name to be used in resource names (usually the cluster's Infra ID)"
+        }
+      },
+      "nsgAllowedSourceIPRanges": {
+        "type": "array",
+        "defaultValue": [
+            "149.173.0.0/16",
+            "52.226.102.80/31"
+        ],
+        "metadata": {
+          "description": "Comma-delimited ranges of IP addresses that are permitted to connect to the OCP API"
+        }
+      }
+    },
+    "variables" : {
+      "location" : "[resourceGroup().location]",
+      "virtualNetworkName" : "[concat(parameters('baseName'), '-vnet')]",
+      "addressPrefix" : "10.255.0.0/16",
+      "controlPlaneSubnetName" : "[concat(parameters('baseName'), '-controlPlane-subnet')]",
+      "controlPlaneSubnetPrefix" : "10.255.0.0/24",
+      "nodeSubnetName" : "[concat(parameters('baseName'), '-worker-subnet')]",
+      "nodeSubnetPrefix" : "10.255.1.0/24",
+      "clusterNsgName" : "[concat(parameters('baseName'), '-nsg')]",
+      "publicipname" : "[concat(parameters('baseName'), '-nat-pip')]",
+      "natgatewayname" : "[concat(parameters('baseName'), '-nat-gateway')]"
+    },
+    "resources" : [
+      {
+        "type": "Microsoft.Network/publicIPAddresses",
+        "apiVersion": "2020-11-01",
+        "name": "[variables('publicipname')]",
+        "location": "[variables('location')]",
+        "sku": {
+          "name": "Standard"
+        },
+        "properties": {
+          "publicIPAddressVersion": "IPv4",
+          "publicIPAllocationMethod": "Static",
+          "idleTimeoutInMinutes": 4
+        }
+      },
+      {
+        "apiVersion" : "2020-11-01",
+        "type" : "Microsoft.Network/virtualNetworks",
+        "name" : "[variables('virtualNetworkName')]",
+        "location" : "[variables('location')]",
+        "dependsOn" : [
+          "[concat('Microsoft.Network/networkSecurityGroups/', variables('clusterNsgName'))]",
+      "[resourceId('Microsoft.Network/natGateways', variables('natgatewayname'))]"
+        ],
+        "properties" : {
+          "addressSpace" : {
+            "addressPrefixes" : [
+              "[variables('addressPrefix')]"
+            ]
+          },
+          "subnets" : [
+            {
+              "name" : "[variables('controlPlaneSubnetName')]",
+              "properties" : {
+                "addressPrefix" : "[variables('controlPlaneSubnetPrefix')]",
+                "natGateway": {
+                  "id": "[resourceId('Microsoft.Network/natGateways', variables('natgatewayname'))]"
+                },
+                "serviceEndpoints": [],
+                "networkSecurityGroup" : {
+                  "id" : "[resourceId('Microsoft.Network/networkSecurityGroups', variables('clusterNsgName'))]"
+                }
+              }
+            },
+            {
+              "name" : "[variables('nodeSubnetName')]",
+              "properties" : {
+                "addressPrefix" : "[variables('nodeSubnetPrefix')]",
+                "natGateway": {
+                  "id": "[resourceId('Microsoft.Network/natGateways', variables('natgatewayname'))]"
+                },
+                "serviceEndpoints": [],
+                "networkSecurityGroup" : {
+                  "id" : "[resourceId('Microsoft.Network/networkSecurityGroups', variables('clusterNsgName'))]"
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "Microsoft.Network/natGateways",
+        "apiVersion": "2020-11-01",
+        "name": "[variables('natgatewayname')]",
+        "location": "[variables('location')]",
+        "sku": {
+          "name": "Standard"
+        },
+        "dependsOn": [
+          "[resourceId('Microsoft.Network/publicIPAddresses', variables('publicipname'))]"
+        ],
+        "properties": {
+          "idleTimeoutInMinutes": 4,
+          "publicIpAddresses": [
+            {
+              "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('publicipname'))]"
+            }
+          ]
+        }
+      },
+      {
+        "type" : "Microsoft.Network/networkSecurityGroups",
+        "name" : "[variables('clusterNsgName')]",
+        "apiVersion" : "2020-11-01",
+        "location" : "[variables('location')]",
+        "properties" : {
+          "securityRules" : [
+            {
+              "name" : "apiserver_in",
+              "properties" : {
+                "protocol" : "Tcp",
+                "sourcePortRange" : "*",
+                "destinationPortRanges" : [
+                    "443",
+                    "6443"
+                ],
+                "sourceAddressPrefixes" : "[array(parameters('nsgAllowedSourceIPRanges'))]",
+                "destinationAddressPrefix" : "*",
+                "access" : "Allow",
+                "priority" : 101,
+                "direction" : "Inbound"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }

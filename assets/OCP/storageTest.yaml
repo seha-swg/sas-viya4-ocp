@@ -1,0 +1,33 @@
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: gel-test-claim
+spec:
+  storageClassName: sas-azurefile
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 1Gi
+---
+kind: Pod
+apiVersion: v1
+metadata:
+  name: gel-test-pod
+spec:
+  containers:
+  - name: gel-test-pod
+    image: gcr.io/google_containers/busybox:1.27
+    command:
+      - "/bin/sh"
+    args:
+      - "-c"
+      - "touch /mnt/SUCCESS && exit 0 || exit 1"
+    volumeMounts:
+      - name: rwx-pvc
+        mountPath: "/mnt"
+  restartPolicy: "Never"
+  volumes:
+    - name: rwx-pvc
+      persistentVolumeClaim:
+        claimName: gel-test-claim

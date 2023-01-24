@@ -1,0 +1,26 @@
+apiVersion: config.openshift.io/v1
+kind: OAuth
+metadata:
+  name: cluster
+spec:
+  identityProviders:
+  - name: gelenable-adds
+    mappingMethod: claim
+    type: LDAP
+    ldap:
+      attributes:
+        id:
+        - {{ LDAP_USER_ATTRIBUTE }}
+        email:
+        - mail
+        name:
+        - displayName
+        preferredUsername:
+        - {{ LDAP_USER_ATTRIBUTE }}
+      bindDN: "{{ LDAP_BINDDN }}"
+      bindPassword:
+        name: ldap-secret
+#      ca:
+#        name: ca-config-map
+      insecure: false
+      url: "ldaps://{{ LDAP_HOST }}:{{ LDAP_PORT }}/{{ LDAP_BASEDN }}?{{ LDAP_USER_ATTRIBUTE }}"

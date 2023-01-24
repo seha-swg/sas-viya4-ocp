@@ -1,0 +1,1 @@
+../../common/GEL.042.Create.OCP.controlPlane.sh

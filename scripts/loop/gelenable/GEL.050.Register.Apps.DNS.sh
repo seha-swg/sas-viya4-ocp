@@ -1,0 +1,1 @@
+../../common/GEL.050.Register.Apps.DNS.sh

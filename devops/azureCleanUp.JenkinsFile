@@ -1,0 +1,126 @@
+def GROUPS
+
+pipeline {
+    agent {
+        label 'gelkinsrunner'
+    }
+    environment {
+        AZURE_CONFIG_DIR="${env.WORKSPACE}/.azure"
+    }
+    options {
+        timeout(time: 30, unit: 'MINUTES')
+    }
+    stages {
+        stage('Prepare'){
+            steps {
+                echo "Running ${env.JOB_NAME} in ${env.WORKSPACE} on node ${env.NODE_NAME}. Jenkins: ${env.JENKINS_URL}"
+                cleanWs(patterns: [[pattern: '*', type: 'INCLUDE']])
+                sh 'printenv; ls -la'
+            }
+        }
+        stage('Login to Azure') {
+            options { retry(3) }
+            agent {
+                docker {
+                    image 'mcr.microsoft.com/azure-cli'
+                    label 'gelkinsrunner'
+                    reuseNode true
+                }
+            }
+            steps {
+                withCredentials([file(credentialsId: 'PSGEL300_keyCert.pem', variable: 'CERTIFICATE_FILE'), azureServicePrincipal('PSGEL300SP')]) {
+                    sh label: 'Login to Azure', script: '''
+                        az login --service-principal -u "${AZURE_CLIENT_ID}" -p "${CERTIFICATE_FILE}" -t "${AZURE_TENANT_ID}"
+                        az account set -s "${AZURE_SUBSCRIPTION_ID}"
+                    '''
+
+                sh label: 'Find Resource Groups', script: '''
+                    EXCLUSION=${EXCLUSION:-NONE}
+                    OFFSET=${OFFSET:-2d}
+                    PSGEL300_GROUPS=$(az group list --query "[?contains(name,'PSGEL300')].[name,tags.student]" -o tsv | grep -Ev "${EXCLUSION}" | cut -f1)
+                    echo "${PSGEL300_GROUPS}" > groups.txt
+                    for RG in ${PSGEL300_GROUPS}; do
+                        START_TIME=$(az monitor activity-log list -g "$RG" --offset "${OFFSET}" --max-events 100000 --query "[?operationName.value=='Microsoft.Resources/subscriptions/resourcegroups/write'].eventTimestamp" -o tsv | sort | tail -1)
+                        if [ -z "$START_TIME" ]; then
+                            echo "  >>> $RG not created in the last $OFFSET => TO BE DELETED"
+                            az group delete --name "$RG" --no-wait --yes
+                        else
+                            echo "  >>> $RG last time created in the last $OFFSET => keep"
+                            #remove this RG from the list of deleted ones.
+                            sed -i "/$RG/d" groups.txt
+                        fi
+                    done
+                '''
+                }
+           }
+        }
+        stage('Delete Names DNS entries') {
+
+            steps {
+                //This is glsuser2
+                withCredentials([usernamePassword(credentialsId: 'cf76689d-66d2-4fe5-abc5-70125199b46a', passwordVariable: 'USER_PASS', usernameVariable: 'USER_ID')]) {
+                    sh label: 'Call Names and Delete DNS entries', script: '''#!/bin/bash
+                        ## loop over groups saved in groups.txt in the previous step
+                        while IFS= read -r RG
+                        do
+                            BASEHOST=${RG/PSGEL300-/}
+                            ## remove the api registration
+                            nm0="api.${BASEHOST}.gelsandbox.race.sas.com"
+                            rd0="$(dig ${nm0} +short)"
+                            echo Going to remove registration of ${nm0} as ${rd0}
+                            curl -k --user ${USER_ID}:${USER_PASS} \
+                                "https://names.na.sas.com/api.php?op=D&nm0=${nm0}&rd0=${rd0}"
+                            ## remove the *.apps alias
+                            nm0="*.apps.${BASEHOST}.gelsandbox.race.sas.com"
+                            rd0="apps.${BASEHOST}.gelsandbox.race.sas.com"
+                            echo Going to remove registration of ${nm0} as ${rd0}
+                            curl -k --user ${USER_ID}:${USER_PASS} \
+                                "https://names.na.sas.com/api.php?op=D&nm0=${nm0}&rd0=${rd0}"
+                            ## remove the apps registration
+                            nm0="apps.${BASEHOST}.gelsandbox.race.sas.com"
+                            rd0="$(dig ${nm0} +short)"
+                            echo Going to remove registration of ${nm0} as ${rd0}
+                            curl -k --user ${USER_ID}:${USER_PASS} \
+                                "https://names.na.sas.com/api.php?op=D&nm0=${nm0}&rd0=${rd0}"
+
+                        done < <(cat groups.txt)
+                    '''
+                }
+            }
+        }
+    }
+    post{
+        always{
+            echo "====++++always++++===="
+            script {
+                GROUPS = readFile(file: 'groups.txt')
+            }
+        }
+        success{
+            echo "====++++only when successful++++===="
+            mail to: "${EMAILS}", \
+                subject: "Jenkins ${env.JOB_NAME} Pipeline - Success", \
+                body: "<b>Project: ${env.JOB_NAME}</b> <br>\
+                    Build Number: ${env.BUILD_NUMBER} <br>\
+                    URL of build: ${env.BUILD_URL} <br> <br>\
+                    Groups deleted: ${GROUPS}", \
+                charset: 'UTF-8', \
+                mimeType: 'text/html';
+        }
+        failure{
+            echo "====++++only when failed++++===="
+            mail to: "${EMAILS}", \
+                subject: "Jenkins ${env.JOB_NAME} Pipeline - FAIL", \
+                body: "<b>Project: ${env.JOB_NAME}</b> <br>\
+                    Build Number: ${env.BUILD_NUMBER} <br>\
+                    URL of build: ${env.BUILD_URL} <br> <br>\
+                    Groups to be deleted: ${GROUPS}", \
+                charset: 'UTF-8', \
+                mimeType: 'text/html';
+        }
+        cleanup{
+            echo "====++++cleanUp++++===="
+            deleteDir()
+        }
+    }
+}

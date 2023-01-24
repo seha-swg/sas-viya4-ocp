@@ -1,0 +1,1 @@
+../../common/GEL.060.Create.Storage.Class.sh

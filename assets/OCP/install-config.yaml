@@ -1,0 +1,46 @@
+apiVersion: v1
+baseDomain: ${BASE_DOMAIN}
+controlPlane:
+  hyperthreading: Enabled
+  name: master
+  platform:
+    azure:
+      osDisk:
+        diskSizeGB: 1024
+      type: Standard_D8s_v4
+  replicas: 3
+compute:
+- hyperthreading: Enabled
+  name: worker
+  platform:
+    azure:
+      type: Standard_D8s_v4
+      osDisk:
+        diskSizeGB: 512
+      zones:
+      - "1"
+  replicas: ${WORKER_REPLICAS}
+metadata:
+  name: ${CLUSTER_NAME}
+networking:
+  clusterNetwork:
+  - cidr: 10.128.0.0/14
+    hostPrefix: 23
+  machineNetwork:
+  - cidr: 10.255.0.0/16
+  networkType: OVNKubernetes
+  serviceNetwork:
+  - 172.30.0.0/16
+platform:
+  azure:
+    baseDomainResourceGroupName: ${AZURE_INFRA_RG}
+    region: ${AZURE_REGION}
+    resourceGroupName: ${AZURE_INFRA_RG}
+    networkResourceGroupName: ${AZURE_INFRA_RG}
+    virtualNetwork: ${AZURE_INFRA_RG}-vnet
+    controlPlaneSubnet: ${AZURE_INFRA_RG}-controlPlane-subnet
+    computeSubnet: ${AZURE_INFRA_RG}-worker-subnet
+    outboundType: UserDefinedRouting
+    cloudName: AzurePublicCloud
+pullSecret: '${OCP_PULL_SECRET}'
+sshKey: '${SSH_KEY_CLUSTER}'
